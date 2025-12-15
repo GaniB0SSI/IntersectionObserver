@@ -1,4 +1,5 @@
 <script lang="ts">
+  // IntersectionObserver options the Svelte action understands
   type IntersectionParams = {
     threshold?: number | number[];
     root?: Element | null;
@@ -8,6 +9,7 @@
     onLeave?: (entry: IntersectionObserverEntry) => void;
   };
 
+  // Svelte 5-friendly action: rebuilds the observer when options change
   function intersect(node: HTMLElement, params: IntersectionParams = {}) {
     let opts = {
       root: params.root ?? null,
@@ -24,9 +26,7 @@
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             current.onEnter?.(entry);
-            if (current.once) {
-              observer.unobserve(entry.target);
-            }
+            if (current.once) observer.unobserve(entry.target);
           } else {
             current.onLeave?.(entry);
           }
@@ -35,10 +35,12 @@
       observer.observe(node);
     };
 
+    // create observer immediately
     init();
 
     return {
       update(next: IntersectionParams) {
+        // merge new params and recreate the observer with fresh options
         current = { ...current, ...next } satisfies IntersectionParams;
         opts = {
           root: next.root ?? opts.root ?? null,
@@ -66,7 +68,9 @@
     { id: 'reveal', label: 'Reveal' },
     { id: 'spy', label: 'Scroll Spy' },
     { id: 'log', label: 'Live Log' }
-  ];
+  ] as const;
+
+  type SectionId = (typeof navSections)[number]['id'];
 
   const gallery = [
     {
@@ -148,6 +152,7 @@
     }
   ];
 
+  // Snippet we display in the UI
   const actionSnippet = `const action = (node, options) => {
   const observer = new IntersectionObserver(
     (entries) => {
@@ -164,13 +169,33 @@
   return { destroy: () => observer.disconnect() };
 };`;
 
-  let activeSection = 'overview';
-  let revealThreshold = 0.35;
-  let imageSrc: Record<string, string> = Object.fromEntries(gallery.map((item) => [item.id, item.blur]));
-  let loadedImages = new Set<string>();
-  let revealed = new Set<string>();
-  let logs: LogEntry[] = [];
 
+
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const img = entry.target;
+    img.src = img.dataset.src;
+    observer.unobserve(img);
+  }
+}, {
+  root: null,
+  rootMargin: "200px 0px",
+  threshold: 0
+});
+
+
+
+
+  // Svelte 5 runes: wrap mutable values in $state so reassignments propagate
+  let activeSection = $state<SectionId>('overview');
+  let revealThreshold = $state(0.35);
+  let imageSrc = $state<Record<string, string>>(Object.fromEntries(gallery.map((item) => [item.id, item.blur])));
+  let loadedImages = $state(new Set<string>());
+  let revealed = $state(new Set<string>());
+  let logs = $state<LogEntry[]>([]);
+
+  // Record an intersection event for the telemetry list
   const note = (entry: IntersectionObserverEntry, id: string) => {
     logs = [
       {
@@ -187,6 +212,7 @@
     ].slice(0, 10);
   };
 
+  // Lazy load the high-res image and log once it appears
   const loadFull = (item: (typeof gallery)[number], entry?: IntersectionObserverEntry) => {
     if (imageSrc[item.id] === item.full) return;
     const img = new Image();
@@ -198,6 +224,7 @@
     };
   };
 
+  // Mark a reveal block as seen and add to telemetry
   const markRevealed = (id: string, entry?: IntersectionObserverEntry) => {
     if (!revealed.has(id)) {
       revealed = new Set(revealed).add(id);
@@ -216,8 +243,10 @@
 
 <main class="min-h-screen bg-slate-950 text-slate-100">
   <div class="relative isolate overflow-hidden">
+    <!-- Soft gradient backdrop to give depth without affecting hit-testing -->
     <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(52,211,153,0.12),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(59,130,246,0.12),transparent_30%),radial-gradient(circle_at_50%_70%,rgba(236,72,153,0.12),transparent_30%)]"></div>
 
+    <!-- Sticky header + nav to visualize scroll-spy updates -->
     <header class="sticky top-0 z-20 backdrop-blur bg-slate-950/70 border-b border-slate-800/50">
       <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div class="flex items-center gap-3 text-sm font-semibold tracking-tight">
@@ -244,6 +273,7 @@
       </div>
     </header>
 
+    <!-- Overview hero: explains the reusable action that powers the rest -->
     <section
       id="overview"
       use:intersect={{ threshold: 0.6, onEnter: () => (activeSection = 'overview') }}
@@ -282,6 +312,7 @@
       </div>
     </section>
 
+    <!-- Lazy-loading grid: single observer instance handles all cards -->
     <section
       id="lazy"
       use:intersect={{ threshold: 0.5, onEnter: () => (activeSection = 'lazy') }}
@@ -341,6 +372,7 @@
       </div>
     </section>
 
+    <!-- Reveal cards re-run the action when threshold slider moves -->
     <section
       id="reveal"
       use:intersect={{ threshold: 0.55, onEnter: () => (activeSection = 'reveal') }}
@@ -395,6 +427,7 @@
       </div>
     </section>
 
+    <!-- Scroll spy section: every article toggles activeSection via action -->
     <section
       id="spy"
       use:intersect={{ threshold: 0.55, onEnter: () => (activeSection = 'spy') }}
@@ -408,6 +441,9 @@
         </div>
         <div class="hidden text-xs text-slate-400 md:block">threshold: 0.5 - once: false</div>
       </div>
+
+
+
 
       <div class="grid gap-6 lg:grid-cols-[1fr,0.55fr]">
         <div class="space-y-6">
@@ -449,6 +485,7 @@
       </div>
     </section>
 
+    <!-- Live log pulls the last 10 intersection events for debugging -->
     <section
       id="log"
       use:intersect={{ threshold: 0.4, onEnter: () => (activeSection = 'log') }}
